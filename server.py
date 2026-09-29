@@ -15,7 +15,10 @@ from collections import defaultdict, deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import datetime
+
 import db
+import pricecache
 import stores
 import weekly
 
@@ -42,7 +45,7 @@ def allowed(ip, kind):
         return True
 
 
-USER_ROUTE = re.compile(r"^/api/users/([A-Z0-9]+)(?:/(list|essentials|settings|specials|test-email))?$")
+USER_ROUTE = re.compile(r"^/api/users/([A-Z0-9]+)(?:/(list|essentials|picks|settings|specials|test-email))?$")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -87,9 +90,13 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/healthz":
             return self._json(200, {"ok": True})
         if path == "/api/config":
-            return self._json(200, {"emailEnabled": weekly.email_enabled(), "week": weekly.week_start().isoformat()})
+            ws = pricecache.week_start()
+            return self._json(200, {"emailEnabled": weekly.email_enabled(), "week": weekly.week_start().isoformat(),
+                                    "nextUpdate": (ws + datetime.timedelta(days=7)).isoformat()})
         if path == "/api/search":
             return self._search(urllib.parse.parse_qs(parsed.query))
+        if path == "/api/stores":
+            return self._stores(urllib.parse.parse_qs(parsed.query))
         m = USER_ROUTE.match(path)
         if m:
             return self._user_get(m.group(1), m.group(2))
@@ -102,12 +109,26 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(429, {"error": "too many requests"})
         term = (qs.get("q") or [""])[0].strip()[:100]
         store = (qs.get("store") or [""])[0]
-        if not term or store not in stores.STORES:
+        store_id = (qs.get("storeId") or [""])[0]
+        if not term or store not in stores.STORES or (store_id and not store_id.isdigit()):
             return self._json(400, {"error": "need q and store=coles|woolworths"})
         try:
-            self._json(200, {"store": store, "q": term, "items": stores.search(store, term)})
+            # 价格按周缓存：本周查过的直接返回；没有「强制刷新」，每周三 7:00 统一更新
+            items, fetched_at = stores.search(store, term, store_id or None, with_time=True)
+            self._json(200, {"store": store, "q": term, "items": items, "fetchedAt": fetched_at})
         except Exception as e:  # 网络/被拦截等
             self._json(502, {"store": store, "q": term, "error": f"{type(e).__name__}: {e}"})
+
+    def _stores(self, qs):
+        if not allowed(self.ip, "search"):
+            return self._json(429, {"error": "too many requests"})
+        q = (qs.get("q") or [""])[0].strip()[:40]
+        if not q:
+            return self._json(400, {"error": "need q (postcode or suburb)"})
+        try:
+            self._json(200, {"q": q, "coles": stores.nearby_coles_stores(q)})
+        except Exception as e:
+            self._json(502, {"q": q, "error": f"{type(e).__name__}: {e}"})
 
     def _user_get(self, code, sub):
         if not allowed(self.ip, "api"):
@@ -118,7 +139,7 @@ class Handler(SimpleHTTPRequestHandler):
         if sub is None:
             return self._json(200, user)
         if sub == "specials":
-            rows = weekly.check_essentials(user["essentials"])
+            rows = weekly.check_essentials(user["essentials"], weekly.store_id(user))
             return self._json(200, {"week": weekly.week_start().isoformat(), "items": rows})
         self._json(405, {"error": "method not allowed"})
 
@@ -140,7 +161,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_PUT(self):
         m = USER_ROUTE.match(urllib.parse.urlparse(self.path).path)
-        if not m or m.group(2) not in ("list", "essentials", "settings"):
+        if not m or m.group(2) not in ("list", "essentials", "picks", "settings"):
             return self._json(404, {"error": "not found"})
         if not allowed(self.ip, "api"):
             return self._json(429, {"error": "too many requests"})
@@ -153,8 +174,11 @@ class Handler(SimpleHTTPRequestHandler):
                 ok = db.save_list(code, body.get("items"))
             elif sub == "essentials":
                 ok = db.save_essentials(code, body.get("items"))
+            elif sub == "picks":
+                ok = db.save_picks(code, body.get("picks"))
             else:
-                ok = db.save_settings(code, lang=body.get("lang"), email=body.get("email"), notify=body.get("notify"))
+                ok = db.save_settings(code, lang=body.get("lang"), email=body.get("email"), notify=body.get("notify"),
+                                      coles_store=body["colesStore"] if "colesStore" in body else False)
         except (ValueError, AttributeError) as e:
             return self._json(400, {"error": str(e)})
         self._json(200 if ok else 404, {"ok": ok})
@@ -167,7 +191,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(400, {"error": "no email set"})
         if not weekly.email_enabled():
             return self._json(400, {"error": "email not configured on server"})
-        rows = weekly.check_essentials(user["essentials"])
+        rows = weekly.check_essentials(user["essentials"], weekly.store_id(user))
         mail = weekly.build_email(user, rows, weekly.week_start().isoformat())
         if not mail:
             return self._json(200, {"sent": False, "reason": "no specials"})

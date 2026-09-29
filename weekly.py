@@ -1,8 +1,10 @@
-"""每周特价提醒。
+"""每周价格更新 + 特价提醒。
 
-澳洲两大超市的特价每周三更新（周三到下周二）。后台线程在每周三早上（悉尼时间）
-检查所有用户的「每周必需品」，有特价的话给开启了提醒的用户发邮件。
-用户打开网页时也能在「本周特价」页即时看到同样的结果。
+澳洲两大超市的价格和特价每周三更新（周三到下周二）。后台线程在每周三 7:00（悉尼时间）：
+  1. 慢慢重新查所有用户「每周必需品」的价格（每次请求间隔几秒，被拦截就暂停一会儿）；
+  2. 有特价的话给开启了提醒的用户发邮件；
+  3. 再慢慢把上周其他被搜过的商品也重新查一遍，存进缓存（见 pricecache.py），保持一周。
+用户打开网页时也能在「本周特价」页看到同样的结果。
 
 邮件需要配置环境变量（不配置就只在网页里提醒）：
   SMTP_HOST  SMTP_PORT(默认 587)  SMTP_USER  SMTP_PASS  SMTP_FROM(默认同 SMTP_USER)
@@ -21,11 +23,20 @@ from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
 import db
+import pricecache
 import stores
 
 SYDNEY = ZoneInfo("Australia/Sydney")
-RUN_HOUR = 7  # 周三早上 7 点后运行
+# 慢慢抓：每次请求之间的间隔（秒）；被拦截后暂停多久再继续
+PACE = {"coles": 5.0, "woolworths": 2.0}
+BLOCKED_PAUSE = 15 * 60
+MAX_BLOCKS = 3            # 同一轮里被拦截超过这么多次，就跳过这家剩下的，稍后再补
+RETRY_AFTER = 60 * 60     # 没更新完的，1 小时后再补跑一轮
 STORE_NAMES = {"coles": "Coles", "woolworths": "Woolworths"}
+
+
+def store_id(user):
+    return (user.get("colesStore") or {}).get("id")
 
 
 def email_enabled():
@@ -33,9 +44,8 @@ def email_enabled():
 
 
 def week_start(now=None):
-    """本特价周的开始日（最近的周三，悉尼时间）。"""
-    now = now or datetime.datetime.now(SYDNEY)
-    return (now - datetime.timedelta(days=(now.weekday() - 2) % 7)).date()
+    """本价格周的开始日（最近一个周三；周三 7:00 前还算上一周）。"""
+    return pricecache.week_start(now).date()
 
 
 def is_special(p):
@@ -52,7 +62,7 @@ def line_cost(p, qty):
     return p["price"] * qty
 
 
-def check_essentials(essentials):
+def check_essentials(essentials, coles_store_id=None):
     """查每件必需品在两家的最新价格。返回每件的两家商品 + 是否特价 + 哪家便宜。"""
     out = []
     for e in essentials:
@@ -63,7 +73,8 @@ def check_essentials(essentials):
             p, err = None, None
             if pick.get("id") is not None:
                 try:
-                    p = stores.find_product(store, pick["id"], [pick.get("override"), e.get("term"), pick.get("name")])
+                    p = stores.find_product(store, pick["id"], [pick.get("override"), e.get("term"), pick.get("name")],
+                                            coles_store_id if store == "coles" else None)
                 except Exception as ex:  # 网络/被拦截
                     err = str(ex)
             row[store] = {"product": p, "special": is_special(p), "cost": line_cost(p, qty),
@@ -148,12 +159,63 @@ def send_email(to, subject, text, body):
 
 # ---------- 每周任务 ----------
 
+def slow_refresh(keys, label):
+    """按顺序慢慢重新查价：跳过本周已经查过的；被拦截就暂停 15 分钟再试，
+    拦截太多次就先跳过这家超市剩下的（稍后补跑）。返回是否全部更新完。"""
+    done = skipped = failed = deferred = 0
+    blocks = {"coles": 0, "woolworths": 0}
+    for store, store_id, term in keys:
+        if pricecache.is_fresh(store, store_id, term):
+            skipped += 1
+            continue
+        if blocks[store] > MAX_BLOCKS:
+            deferred += 1
+            continue
+        while True:
+            try:
+                stores.refresh(store, term, store_id)
+                done += 1
+                break
+            except Exception as e:
+                if "blocked" in str(e).lower():
+                    blocks[store] += 1
+                    if blocks[store] > MAX_BLOCKS:
+                        deferred += 1
+                        print(f"[weekly] {label}: {store} keeps blocking, skipping the rest for now", flush=True)
+                        break
+                    print(f"[weekly] {label}: blocked by {store}, pausing {BLOCKED_PAUSE // 60} min", flush=True)
+                    time.sleep(BLOCKED_PAUSE)
+                    continue
+                failed += 1  # 其他错误（比如网络问题）：这个词这周先跳过，用户搜索时会再实时查
+                break
+        time.sleep(PACE[store])
+    print(f"[weekly] {label}: refreshed {done}, already fresh {skipped}, failed {failed}, deferred {deferred}", flush=True)
+    return deferred == 0
+
+
+def essential_keys(users):
+    """所有用户必需品要查的 (超市, 门店, 搜索词)，去重。"""
+    keys = []
+    for user in users:
+        for e in user["essentials"]:
+            for store in ("coles", "woolworths"):
+                pick = (e.get("picks") or {}).get(store) or {}
+                term = pick.get("override") or e.get("term")
+                if term:
+                    keys.append((store, store_id(user) if store == "coles" else None, term.strip().lower()))
+    return list(dict.fromkeys(keys))
+
+
 def run_weekly(force=False):
     week = week_start().isoformat()
     sent = checked = 0
-    for user in db.all_users_with_essentials():
+    users = db.all_users_with_essentials()
+    # 1. 先慢慢更新必需品的价格（发邮件要用）
+    complete = slow_refresh(essential_keys(users), "essentials")
+    # 2. 检查特价、发提醒邮件
+    for user in users:
         checked += 1
-        rows = check_essentials(user["essentials"])  # 同时也预热了缓存，用户打开网页会更快
+        rows = check_essentials(user["essentials"], store_id(user))
         if not (email_enabled() and user["notify"] and user["email"]):
             continue
         if user["notifiedWeek"] == week and not force:
@@ -167,21 +229,27 @@ def run_weekly(force=False):
                 traceback.print_exc()
                 continue
         db.mark_notified(user["code"], week)
-    db.meta_set("last_weekly_run", week)
     print(f"[weekly] {week}: checked {checked} users, sent {sent} emails", flush=True)
+    # 3. 再慢慢更新上周其他被搜过的商品，让大家这一周打开网页都直接用缓存
+    complete = slow_refresh(pricecache.stale_keys(), "other searches") and complete
+    if complete:
+        db.meta_set("last_weekly_run", week)  # 全部完成才记录；中途重启会接着更新还没更新的
+    else:
+        db.meta_set("weekly_retry_at", str(time.time() + RETRY_AFTER))
+        print(f"[weekly] {week}: some prices deferred, retrying in {RETRY_AFTER // 60} min", flush=True)
+    return complete
 
 
 def _loop():
     while True:
         try:
-            now = datetime.datetime.now(SYDNEY)
-            week = week_start(now).isoformat()
-            due = now.weekday() != 2 or now.hour >= RUN_HOUR  # 周三要等到早上 7 点
-            if due and db.meta_get("last_weekly_run") != week:
+            # week_start 在周三 7:00 才切换到新的一周，所以一到时间就会触发
+            retry_at = float(db.meta_get("weekly_retry_at") or 0)
+            if db.meta_get("last_weekly_run") != week_start().isoformat() and time.time() >= retry_at:
                 run_weekly()
         except Exception:
             traceback.print_exc()
-        time.sleep(15 * 60)
+        time.sleep(5 * 60)
 
 
 def start_scheduler():

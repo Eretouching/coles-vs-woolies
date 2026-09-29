@@ -14,6 +14,7 @@
       <p data-i18n="subtitle"></p>
     </div>
     <div class="top-actions">
+      <button class="code-chip" id="storeBtn"></button>
       <button class="code-chip" id="codeBtn" title=""></button>
       <div class="lang"><div class="seg" id="langSeg">
         <button data-lang="zh">中文</button><button data-lang="en">EN</button>
@@ -47,7 +48,7 @@
       </div>
       <span class="spacer"></span>
       <button class="ghost" id="newWeekBtn"></button>
-      <button class="ghost" id="refreshBtn" data-i18n="refresh"></button>
+      <span class="price-note" id="priceNote"></span>
       <button class="ghost" id="clearBtn" data-i18n="clear"></button>
     </div>
 
@@ -95,6 +96,46 @@
     <div class="note" id="codeNote"></div>
     <div class="row" style="justify-content:flex-end;margin-top:12px">
       <button class="ghost" id="codeClose" data-i18n="close"></button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="storeDlg">
+  <div class="dlg-body">
+    <h3 data-i18n="storeTitle"></h3>
+    <p data-i18n="storeIntro"></p>
+    <form class="row" id="storeForm">
+      <input type="text" id="storeInput" maxlength="40" autocomplete="postal-code" data-i18n-ph="storePh">
+      <button class="primary" type="submit" data-i18n="storeSearch"></button>
+    </form>
+    <div class="note" id="storeCurrent"></div>
+  </div>
+  <div class="pk-list store-list" id="storeList"></div>
+  <div class="dlg-body">
+    <p class="note" data-i18n="storeWwNote"></p>
+    <div class="row" style="justify-content:space-between">
+      <button class="ghost" id="storeDefaultBtn" data-i18n="storeUseDefault"></button>
+      <button class="ghost" id="storeClose" data-i18n="close"></button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="cartDlg">
+  <div class="dlg-body">
+    <h3><span data-i18n="cartTitle"></span> · <span id="cartPlanName"></span></h3>
+    <div id="cartBody"></div>
+    <div class="cart-how">
+      <b data-i18n="cartHowTitle"></b>
+      <ol>
+        <li><span data-i18n-html="cartHow1"></span><br>
+          <a id="cartBookmark" class="bookmarklet" href="#" data-i18n="cartBookmark"></a></li>
+        <li data-i18n-html="cartHow2"></li>
+        <li data-i18n-html="cartHow3"></li>
+      </ol>
+      <p class="note" data-i18n="cartHowNote"></p>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="ghost" id="cartClose" data-i18n="close"></button>
     </div>
   </div>
 </dialog>

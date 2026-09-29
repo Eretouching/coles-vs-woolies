@@ -3,7 +3,21 @@
 输入购物清单（中文或英文），实时比较 Coles 和 Woolworths 网上商城的价格。
 
 - **比价**：整单去哪家便宜、每件哪家便宜（按单价比，自动算 "2 for $X" 多买优惠）、两家分开买能省多少
+- **自动选品**：全局选「最相关」或「单价最便宜」，每件商品也可以单独切换；「单价最便宜」只在同一分类里比较
+  （新鲜蓝莓不会被换成冷冻蓝莓或蓝莓松饼）
+- **选品记忆**：在「换一个」里挑过的商品会记在服务器上，下次添加同名商品、开始新一周时自动选中；
+  点那件商品自己的「相关 / 最便宜」按钮可以忘掉记忆、恢复自动选品
+- **选择门店**：右上角 📍 输入邮编或区名，选你常去的 Coles 门店，Coles 就按这家店的价格比较。
+  Woolworths 按门店查价需要登录账号，所以只能用网上默认价（悉尼市区各店基本一致）
+- **一键加入购物车**：总价卡片上的「🛒 加入购物车」按方案（全在 Coles / 全在 Woolworths / 分开买）生成购物单。
+  第一次把「🛒 比价加购」书签拖到书签栏；之后点「打开 … 并加购」，在超市官网登录后点这个书签，商品就会加入你的购物车。
+  密码只在超市官网输入，不经过这个工具；书签只加购物车，不结账。
+  防重复、防丢货：每件只分到一家（某家没有就自动改去另一家，两家都没有或还在查价就不允许加购）；
+  书签把数量设成准确值、合并同款、移除购物车里已分给另一家的同款，加完后逐件核对数量
 - **每周必需品**：点商品名左边的 ☆ 标记每周都买的东西（会记住两边选好的具体商品），下周点「开始新一周」一键载入
+- **每周更新一次价格**：两家超市每周三换价格，所以服务器把查到的价格存在数据库里一整周，
+  每周三 7:00（悉尼时间）后台慢慢把所有搜过的商品重新查一遍（每次请求间隔几秒，被拦截就暂停再补）。
+  这一周内不会重复去超市网站查，也没有「强制刷新」，最大程度避免被拦截
 - **本周特价提醒**：两家超市每周三换特价。「本周特价」页显示你的必需品有哪些在打折；配置了邮箱发件服务器的话，每周三早上 7 点（悉尼时间）自动发邮件
 - **中英双语**：右上角切换
 - **多设备同步**：不用注册。每个浏览器会自动得到一个 8 位「清单码」，在手机上输入同一个码就能看到同一份清单
@@ -36,6 +50,11 @@ python3 server.py
    | `SMTP_PASS` | 应用专用密码 | Gmail 需要在账号安全设置里生成「应用专用密码」 |
    | `SMTP_FROM` | `Price Bot <you@gmail.com>` | 可选，默认同 `SMTP_USER` |
    | `APP_URL` | `https://xxx.zeabur.app` | 邮件里的链接 |
+   | `COLES_BFF_KEY` | 见下方 | 可选，门店搜索用 |
+
+   **关于 `COLES_BFF_KEY`**：Coles 门店搜索接口需要 Coles 网页里公开的一个前端 key。服务器会自动从 Coles
+   网页读取；如果网页一直被 Coles 防爬虫拦截（门店搜索报错），可以手动设置：用浏览器打开 coles.com.au，
+   按 F12 打开控制台，输入 `__RUNTIME_CONFIG__.BFF_API_SUBSCRIPTION_KEY`，把得到的值填进这个环境变量。
 
    也可以用 Resend、Brevo、SendGrid 等服务提供的 SMTP。
 
@@ -49,17 +68,20 @@ python3 server.py
 | `server.py` | HTTP 服务器和 API |
 | `stores.py` | 查询 Coles / Woolworths 商品价格 |
 | `db.py` | SQLite 数据库（`$DATA_DIR/app.db`） |
-| `weekly.py` | 每周特价检查和邮件提醒 |
+| `pricecache.py` | 每周价格缓存（数据库表 `price_cache`，有效期到下一个周三 7:00） |
+| `weekly.py` | 每周三 7:00 慢慢更新价格、检查特价、发邮件提醒 |
 | `static/` | 网页（`app.js` 逻辑、`dict.js` 中文→英文词表、`app.css` 样式） |
+| `static/cart-bookmarklet.js` | 「一键加购」书签的源码（在超市网站上运行） |
 
 ## API
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/search?store=coles\|woolworths&q=` | 搜索商品 |
+| GET | `/api/search?store=coles\|woolworths&q=&storeId=` | 搜索商品（`storeId` 为 Coles 门店编号，可选） |
+| GET | `/api/stores?q=2067` | 按邮编/区名找附近的 Coles 门店 |
 | POST | `/api/users` | 新建清单码 |
 | GET | `/api/users/{code}` | 读取清单、必需品和设置 |
-| PUT | `/api/users/{code}/list` · `/essentials` · `/settings` | 保存 |
+| PUT | `/api/users/{code}/list` · `/essentials` · `/picks` · `/settings` | 保存（`picks` 是选品记忆） |
 | GET | `/api/users/{code}/specials` | 本周必需品特价检查 |
 | POST | `/api/users/{code}/test-email` | 立即发一封特价提醒邮件 |
 | GET | `/healthz` | 健康检查 |

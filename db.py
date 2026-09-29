@@ -4,6 +4,9 @@ users 表里存：
   list_json        当前购物清单
   essentials_json  每周必需品（带两家各自选定的商品 ID，下周一键载入、每周检查特价）
   email / notify   特价提醒邮件设置
+  coles_store      选择的 Coles 门店 {"id", "name"}（空 = 网上默认价）
+  picks_json       选品记忆：{商品名或搜索词: {"coles": {"id","name","override"}, "woolworths": {...}}}
+                   你在「换一个」里挑过的商品，下次添加同名商品时自动选中
 """
 import json
 import re
@@ -36,6 +39,12 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """)
+# 给旧数据库补上后来新增的列
+_cols = {r["name"] for r in _conn.execute("PRAGMA table_info(users)")}
+if "coles_store" not in _cols:
+    _conn.execute("ALTER TABLE users ADD COLUMN coles_store TEXT NOT NULL DEFAULT ''")
+if "picks_json" not in _cols:
+    _conn.execute("ALTER TABLE users ADD COLUMN picks_json TEXT NOT NULL DEFAULT '{}'")
 _conn.commit()
 
 
@@ -63,8 +72,10 @@ def _row_to_user(row):
         "lang": row["lang"],
         "email": row["email"],
         "notify": bool(row["notify"]),
+        "colesStore": json.loads(row["coles_store"]) if row["coles_store"] else None,
         "list": json.loads(row["list_json"]),
         "essentials": json.loads(row["essentials_json"]),
+        "picks": json.loads(row["picks_json"]),
         "notifiedWeek": row["notified_week"],
     }
 
@@ -109,8 +120,22 @@ def save_essentials(code, items):
     return _update(code, essentials_json=_dump(items))
 
 
-def save_settings(code, lang=None, email=None, notify=None):
+def save_picks(code, picks):
+    if not isinstance(picks, dict):
+        raise ValueError("object expected")
+    return _update(code, picks_json=_dump(picks))
+
+
+def save_settings(code, lang=None, email=None, notify=None, coles_store=False):
+    """coles_store: False = 不修改，None = 恢复网上默认价，{"id", "name"} = 选择门店。"""
     cols = {}
+    if coles_store is None:
+        cols["coles_store"] = ""
+    elif coles_store is not False:
+        sid, name = str(coles_store.get("id", "")), str(coles_store.get("name", ""))[:100]
+        if not sid.isdigit() or len(sid) > 6:
+            raise ValueError("invalid store")
+        cols["coles_store"] = json.dumps({"id": sid, "name": name}, ensure_ascii=False)
     if lang in ("zh", "en"):
         cols["lang"] = lang
     if email is not None:
