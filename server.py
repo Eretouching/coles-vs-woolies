@@ -209,6 +209,9 @@ if __name__ == "__main__":
         print(f"端口 {PORT} 已被占用 —— 比价工具可能已经在运行了，直接打开 http://localhost:{PORT} 即可。")
         print(f"如需重启，先关掉旧的：lsof -ti :{PORT} | xargs kill")
         raise SystemExit(1)
+    if HOST != "127.0.0.1" and not os.path.ismount(str(stores.DATA_DIR)):
+        print(f"⚠️  数据目录 {stores.DATA_DIR} 不是挂载的存储卷：重新部署或重启后数据库会被清空！"
+              f"请在部署平台上把它挂载为持久化存储。", flush=True)
     weekly.start_scheduler()
     print(f"Coles vs Woolworths 比价工具已启动 → http://localhost:{PORT}  （按 Ctrl+C 停止）", flush=True)
     httpd.serve_forever()

@@ -10,12 +10,13 @@ WORKDIR /app
 COPY *.py ./
 COPY static ./static
 
-# 数据库放在 /data，部署时把这个目录挂载成持久化存储（Volume）
+# 数据库放在 /data。部署时必须在平台上把 /data 挂载成持久化存储（Zeabur：服务 → Volumes，
+# Volume ID 填 data，Mount Directory 填 /data），否则每次重新部署数据都会清空。
+# 这里刻意不写 VOLUME 指令，避免和平台自己挂载的存储卷冲突。
 ENV HOST=0.0.0.0 \
     PORT=8080 \
     DATA_DIR=/data \
     PYTHONUNBUFFERED=1
-VOLUME /data
 EXPOSE 8080
 
 CMD ["python", "server.py"]
