@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coles vs Woolies</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="titles">
+      <h1><span class="c">Coles</span> vs <span class="w">Woolies</span> <span data-i18n="titleSuffix"></span></h1>
+      <p data-i18n="subtitle"></p>
+    </div>
+    <div class="top-actions">
+      <button class="code-chip" id="codeBtn" title=""></button>
+      <div class="lang"><div class="seg" id="langSeg">
+        <button data-lang="zh">中文</button><button data-lang="en">EN</button>
+      </div></div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="list" data-i18n="tabList"></button>
+    <button data-tab="specials"><span data-i18n="tabSpecials"></span><span class="count" id="specialCount"></span></button>
+  </nav>
+
+  <!-- ========== 购物清单 ========== -->
+  <section id="tab-list">
+    <form class="add" id="addForm">
+      <input id="addInput" autocomplete="off">
+      <button class="primary" type="submit" data-i18n="add"></button>
+    </form>
+    <div class="chips" id="chips"></div>
+
+    <div class="banner" id="specialBanner" hidden>
+      <span id="specialBannerText"></span><span class="spacer"></span>
+      <button data-goto="specials" data-i18n="view"></button>
+    </div>
+
+    <div class="toolbar">
+      <span data-i18n="autoPick"></span>
+      <div class="seg" id="modeSeg">
+        <button data-mode="match" data-i18n="modeMatch"></button>
+        <button data-mode="cheap" data-i18n="modeCheap"></button>
+      </div>
+      <span class="spacer"></span>
+      <button class="ghost" id="newWeekBtn"></button>
+      <button class="ghost" id="refreshBtn" data-i18n="refresh"></button>
+      <button class="ghost" id="clearBtn" data-i18n="clear"></button>
+    </div>
+
+    <div id="summary"></div>
+    <div id="list"></div>
+  </section>
+
+  <!-- ========== 本周特价 ========== -->
+  <section id="tab-specials" hidden>
+    <div class="panel">
+      <h2 id="spTitle"></h2>
+      <p data-i18n="spIntro"></p>
+      <div id="spSummary"></div>
+    </div>
+    <div id="spList"></div>
+
+    <div class="panel" id="remindPanel">
+      <h2 data-i18n="remindTitle"></h2>
+      <p data-i18n="remindIntro"></p>
+      <div id="remindBody"></div>
+    </div>
+  </section>
+
+  <footer data-i18n="footer"></footer>
+</div>
+
+<dialog id="picker">
+  <div class="pk-head">
+    <span class="t" id="pkTitle"></span>
+    <input id="pkSearch">
+    <button class="ghost" id="pkClose">✕</button>
+  </div>
+  <div class="pk-list" id="pkList"></div>
+</dialog>
+
+<dialog id="codeDlg" class="small">
+  <div class="dlg-body">
+    <h3 data-i18n="codeTitle"></h3>
+    <p data-i18n="codeIntro"></p>
+    <div class="big-code" id="codeBig"></div>
+    <form class="row" id="codeForm">
+      <input type="text" id="codeInput" maxlength="8" autocomplete="off" style="text-transform:uppercase">
+      <button class="primary" type="submit" data-i18n="codeSwitch"></button>
+    </form>
+    <div class="note" id="codeNote"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button class="ghost" id="codeClose" data-i18n="close"></button>
+    </div>
+  </div>
+</dialog>
+
+<script src="dict.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
