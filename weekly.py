@@ -30,6 +30,11 @@ SYDNEY = ZoneInfo("Australia/Sydney")
 # 慢慢抓：每次请求之间的间隔（秒）；被拦截后暂停多久再继续
 PACE = {"coles": 5.0, "woolworths": 2.0}
 BLOCKED_PAUSE = 15 * 60
+# 每周更新哪些价格：
+#   selected（默认，适合本地使用）：只更新「已选择的货品」= 每个用户当前清单里的商品 + 每周必需品。
+#       新的一周第一次打开时，别的搜索词不会被重新查，用到才查。
+#   all（Docker 镜像里默认，适合多人使用的服务器）：再把过去三周被搜过的所有词也慢慢重新查一遍。
+REFRESH_MODE = os.environ.get("WEEKLY_REFRESH", "selected").strip().lower()
 MAX_BLOCKS = 3            # 同一轮里被拦截超过这么多次，就跳过这家剩下的，稍后再补
 RETRY_AFTER = 60 * 60     # 没更新完的，1 小时后再补跑一轮
 STORE_NAMES = {"coles": "Coles", "woolworths": "Woolworths"}
@@ -193,6 +198,10 @@ def slow_refresh(keys, label):
     return deferred == 0
 
 
+def _key(user, store, term):
+    return store, store_id(user) if store == "coles" else None, term.strip().lower()
+
+
 def essential_keys(users):
     """所有用户必需品要查的 (超市, 门店, 搜索词)，去重。"""
     keys = []
@@ -202,16 +211,30 @@ def essential_keys(users):
                 pick = (e.get("picks") or {}).get(store) or {}
                 term = pick.get("override") or e.get("term")
                 if term:
-                    keys.append((store, store_id(user) if store == "coles" else None, term.strip().lower()))
+                    keys.append(_key(user, store, term))
+    return list(dict.fromkeys(keys))
+
+
+def list_keys(users):
+    """所有用户当前清单里的商品要查的 (超市, 门店, 搜索词)，去重。"""
+    keys = []
+    for user in users:
+        for it in user["list"]:
+            for store in ("coles", "woolworths"):
+                term = (it.get("override") or {}).get(store) or it.get("term")
+                if term:
+                    keys.append(_key(user, store, term))
     return list(dict.fromkeys(keys))
 
 
 def run_weekly(force=False):
     week = week_start().isoformat()
     sent = checked = 0
-    users = db.all_users_with_essentials()
-    # 1. 先慢慢更新必需品的价格（发邮件要用）
-    complete = slow_refresh(essential_keys(users), "essentials")
+    everyone = db.all_users_with_items()
+    users = [u for u in everyone if u["essentials"]]
+    # 1. 先慢慢更新必需品的价格（发邮件要用），再更新各人当前清单里的商品
+    complete = slow_refresh(essential_keys(everyone), "essentials")
+    complete = slow_refresh(list_keys(everyone), "current lists") and complete
     # 2. 检查特价、发提醒邮件
     for user in users:
         checked += 1
@@ -230,8 +253,9 @@ def run_weekly(force=False):
                 continue
         db.mark_notified(user["code"], week)
     print(f"[weekly] {week}: checked {checked} users, sent {sent} emails", flush=True)
-    # 3. 再慢慢更新上周其他被搜过的商品，让大家这一周打开网页都直接用缓存
-    complete = slow_refresh(pricecache.stale_keys(), "other searches") and complete
+    # 3. （WEEKLY_REFRESH=all）再慢慢更新过去几周其他被搜过的商品，让大家这一周打开网页都直接用缓存
+    if REFRESH_MODE == "all":
+        complete = slow_refresh(pricecache.stale_keys(), "other searches") and complete
     if complete:
         db.meta_set("last_weekly_run", week)  # 全部完成才记录；中途重启会接着更新还没更新的
     else:

@@ -38,7 +38,11 @@
 python3 server.py
 ```
 
-打开 http://localhost:8765 。macOS 上也可以双击 `启动比价.command`。数据保存在 `./data/`。
+打开 http://localhost:8765 。macOS 上也可以双击 `启动比价.command`。
+
+所有数据（包括价格缓存）都保存在 `./data/app.db`，重启程序不会重新抓取价格。在同一个价格周内
+（周三 7:00 到下周三）只读取已经保存的价格；新的一周第一次打开时，只会更新你**已选择的货品**
+（当前清单和每周必需品）的价格，其他搜索词只有你再去搜的时候才会查。
 
 ## 部署
 
@@ -83,14 +87,16 @@ docker run -d --name price-check --restart unless-stopped \
 | `HOST` | `127.0.0.1`（Docker 镜像里是 `0.0.0.0`） | 监听地址 |
 | `PORT` | `8765`（Docker 镜像里是 `8080`） | 监听端口 |
 | `DATA_DIR` | `./data`（Docker 镜像里是 `/data`） | `app.db` 所在目录，生产环境必须是持久化存储 |
+| `WEEKLY_REFRESH` | `selected`（Docker 镜像里是 `all`） | 周三任务更新哪些价格。`selected`：只更新每个用户当前清单和每周必需品；`all`：再更新过去三周搜过的所有词，让大家打开都是秒出结果（适合多人共用的服务器） |
 | `SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`SMTP_FROM` | – | 每周特价邮件的发件设置。不设置 `SMTP_HOST` 和 `SMTP_USER` 就只能在网页里看特价。587 = STARTTLS，465 = SSL，Gmail 需要用「应用专用密码」 |
 | `APP_URL` | – | 邮件里的链接 |
 | `COLES_BFF_KEY` | 自动读取 | Coles 门店搜索用的网页公开 key。只有 Coles 网页读不到时才需要手动设置：打开 coles.com.au，在浏览器控制台运行 `__RUNTIME_CONFIG__.BFF_API_SUBSCRIPTION_KEY` |
 
 ## 运维
 
-- **每周任务**：每周三悉尼时间 7:00 起，服务器慢慢重新查价（Coles 请求间隔 5 秒，Woolworths 间隔 2 秒）、
-  发特价邮件，再更新其他被搜过的词。被 Coles 拦截就暂停 15 分钟再试，没更新完的 1 小时后补跑。
+- **每周任务**：每周三悉尼时间 7:00 起（或新的一周第一次启动程序时），服务器慢慢重新查价
+  （Coles 请求间隔 5 秒，Woolworths 间隔 2 秒）：先更新每周必需品，再更新各人当前清单，然后发特价邮件，
+  最后（仅 `WEEKLY_REFRESH=all`）更新其他被搜过的词。被 Coles 拦截就暂停 15 分钟再试，没更新完的 1 小时后补跑。
 - **备份**：所有数据都在 `$DATA_DIR/app.db`（SQLite，WAL 模式）。用 `sqlite3 app.db ".backup backup.db"` 备份，
   或者停掉服务后把 `app.db`、`app.db-wal`、`app.db-shm` 一起复制走。
 - **升级**：拉取新代码、重新构建、重启即可，数据库新增的字段会自动补上。

@@ -92,6 +92,13 @@ def all_users_with_essentials():
     return [_row_to_user(r) for r in rows]
 
 
+def all_users_with_items():
+    """有清单或有每周必需品的用户（这些人的「已选择货品」需要每周更新价格）。"""
+    with _lock:
+        rows = _conn.execute("SELECT * FROM users WHERE essentials_json != '[]' OR list_json != '[]'").fetchall()
+    return [_row_to_user(r) for r in rows]
+
+
 def _update(code, **cols):
     cols["updated_at"] = int(time.time())
     sets = ", ".join(f"{k} = ?" for k in cols)

@@ -16,6 +16,7 @@ COPY static ./static
 ENV HOST=0.0.0.0 \
     PORT=8080 \
     DATA_DIR=/data \
+    WEEKLY_REFRESH=all \
     PYTHONUNBUFFERED=1
 EXPOSE 8080
 

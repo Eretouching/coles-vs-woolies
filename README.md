@@ -44,7 +44,11 @@ python3 server.py
 ```
 
 Open http://localhost:8765. On macOS you can also double-click `启动比价.command`.
-Data is stored in `./data/`.
+
+Everything is stored in `./data/app.db`, including the price cache, so restarting the program does not
+re-fetch prices. Within the same price week (Wednesday 07:00 to the next Wednesday) it only reads the saved
+prices. When you open it in a new week, only the items you have selected (your current list and weekly
+essentials) get fresh prices; other searches are fetched only if you look them up.
 
 ## Deploy
 
@@ -91,14 +95,16 @@ All environment variables are optional. See [`.env.example`](.env.example).
 | `HOST` | `127.0.0.1` (Docker image: `0.0.0.0`) | Address to listen on |
 | `PORT` | `8765` (Docker image: `8080`) | Port to listen on |
 | `DATA_DIR` | `./data` (Docker image: `/data`) | Where `app.db` is stored. Must be persistent in production |
+| `WEEKLY_REFRESH` | `selected` (Docker image: `all`) | What the Wednesday job refreshes. `selected`: only each user's current list and weekly essentials. `all`: also every term searched in the last three weeks, so everyone gets instant results (for shared servers) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | – | Outgoing mail for weekly specials emails. Without `SMTP_HOST` and `SMTP_USER`, specials only show in the web page. Port 587 = STARTTLS, 465 = SSL. Gmail needs an app password |
 | `APP_URL` | – | Link used inside the emails |
 | `COLES_BFF_KEY` | read automatically | Public front-end key used by Coles store search. Only set it if Coles' web page is blocked: open coles.com.au, run `__RUNTIME_CONFIG__.BFF_API_SUBSCRIPTION_KEY` in the browser console |
 
 ## Operations
 
-- **Weekly job**: every Wednesday from 07:00 Sydney time the server slowly refreshes prices (5 s between Coles
-  requests, 2 s between Woolworths requests), sends specials emails, then refreshes other searched terms. If Coles
+- **Weekly job**: every Wednesday from 07:00 Sydney time (or when the program is first started in a new week)
+  the server slowly refreshes prices (5 s between Coles requests, 2 s between Woolworths requests): weekly
+  essentials first, then current lists, then sends specials emails, then (`WEEKLY_REFRESH=all` only) other searched terms. If Coles
   blocks it, it pauses 15 minutes and retries; unfinished work is retried an hour later.
 - **Backup**: everything lives in `$DATA_DIR/app.db` (SQLite, WAL mode). Back it up with
   `sqlite3 app.db ".backup backup.db"`, or stop the server and copy `app.db`, `app.db-wal`, `app.db-shm`.
