@@ -333,6 +333,28 @@ def search(store, term, store_id=None, with_time=False):
     return hit if with_time else hit[0]
 
 
+REFRESH_COOLDOWN = 10 * 60  # 同一个搜索词，用户手动刷新的最短间隔（秒）
+
+
+def search_fresh(store, term, store_id=None):
+    """用户点了某个货品的「刷新」：实时重新抓这一个搜索词，结果存进缓存供所有人使用。
+
+    为了不被超市拦截：同一个词 10 分钟内已经抓过（不管是谁触发的）就直接返回那份数据，不再访问超市。
+    返回 (商品列表, 抓取时间, 是否因冷却期而直接用了刚抓的数据)。
+    """
+    import pricecache
+    sid = store_id if store == "coles" else None
+    k = (store, sid, term.strip().lower())
+    with _key_locks_lock:
+        lock = _key_locks.setdefault(k, threading.Lock())
+    with lock:
+        hit = pricecache.get(store, sid, term)
+        if hit and time.time() - hit[1] < REFRESH_COOLDOWN:
+            return hit[0], hit[1], True
+        items = STORES[store].search(term, sid)  # 失败会抛异常，缓存里原来的数据保持不变
+        return items, pricecache.put(store, sid, term, items), False
+
+
 def refresh(store, term, store_id=None):
     """每周更新任务用：不管缓存，直接重新查一次并存起来。"""
     import pricecache

@@ -40,6 +40,9 @@ const I18N = {
     codeSwitch: "切换到这个码", codeBad: "找不到这个清单码", close: "关闭", codeChip: "清单码 {c}",
     blockedMsg: "{s} 网站暂时限制了访问，几分钟后再点「重试」（本周查到的价格会一直保存，不用反复查）",
     noPrices: "暂时查不到可以比较的价格，请稍后重试。",
+    refreshItem: "实时刷新这件商品在两家的最新价格", refreshing: "正在更新价格…",
+    updatedAt: "价格更新于 {t}", justUpdated: "刚更新过，10 分钟内不会重复抓取",
+    refreshLimit: "刷新太频繁了，请稍后再试（为了避免被超市网站限制访问）",
     priceNoteTip: "两家超市每周三换价格和特价。服务器每周三早上统一更新一次，这一周内不会重复去超市网站查，避免被拦截。",
     lostPick: "你上次选的「{n}」这次没找到（可能下架或缺货），已临时自动选品，可点「换一个」重新挑。",
     itemMatch: "相关", itemCheap: "最便宜", itemModeTip: "这件商品按什么自动选品", itemManual: "已手动选择商品（会记住，下次自动选这一款）。点这里恢复自动选品",
@@ -109,6 +112,9 @@ const I18N = {
     codeSwitch: "Switch to this code", codeBad: "Code not found", close: "Close", codeChip: "Code {c}",
     blockedMsg: "{s} is temporarily limiting access. Tap “Retry” in a few minutes (prices are kept for the whole week once found)",
     noPrices: "No comparable prices yet, try again shortly.",
+    refreshItem: "Fetch the latest price of this item at both stores", refreshing: "Updating price…",
+    updatedAt: "Price updated {t}", justUpdated: "just updated, won't be fetched again for 10 minutes",
+    refreshLimit: "Too many refreshes, try again later (to avoid being blocked by the supermarkets)",
     priceNoteTip: "Both supermarkets change prices and specials every Wednesday. The server updates everything once on Wednesday morning and doesn't re-check during the week, to avoid being blocked.",
     lostPick: "Your usual pick “{n}” wasn't found this time (maybe discontinued or out of stock). Auto-picked for now, tap “Change” to choose again.",
     itemMatch: "Relevant", itemCheap: "Cheapest", itemModeTip: "How to auto-pick this item", itemManual: "Picked by hand (remembered for next time). Tap to go back to auto-pick",
@@ -242,15 +248,17 @@ function toTerm(label) {
   return extra || s;
 }
 
-async function fetchStore(item, store, force) {
+async function fetchStore(item, store, force, fresh) {
   const r = results[item.id] ||= {};
   if (r[store] && !force && !r[store].error) return;
-  r[store] = { loading: true };
+  // fresh = 用户点了这个货品的「刷新」：实时抓最新价格；抓取期间和失败时都保留原来的价格
+  const prev = fresh && r[store]?.items ? r[store] : null;
+  r[store] = prev ? { ...prev, refreshing: true, note: null } : { loading: true };
   renderList();
   const q = item.override?.[store] || item.term;
   const sid = store === "coles" && user.colesStore ? `&storeId=${user.colesStore.id}` : "";
   try {
-    const data = await api("GET", `/api/search?store=${store}&q=${encodeURIComponent(q)}${sid}`);
+    const data = await api("GET", `/api/search?store=${store}&q=${encodeURIComponent(q)}${sid}${fresh ? "&fresh=1" : ""}`);
     let list = data.items;
     // 之前选好的商品不在这次的搜索结果里：用它的商品名再搜一次
     const pinned = item.sel?.[store], pinnedName = item.selName?.[store];
@@ -263,16 +271,26 @@ async function fetchStore(item, store, force) {
       }
       if (!list.some(p => String(p.id) === String(pinned))) lostPick = pinnedName || String(pinned);
     }
-    r[store] = { items: list, lostPick, fetchedAt: data.fetchedAt };
+    r[store] = { items: list, lostPick, fetchedAt: data.fetchedAt, cooldown: !!data.cooldown };
     // 功能上线前手动挑过的商品：补记到选品记忆里
     const hit = pinned != null && list.find(p => String(p.id) === String(pinned));
     if (hit && !memoryOf(item)?.[store]) rememberPick(item, store, hit);
   } catch (e) {
-    r[store] = { error: e.status ? (/blocked/i.test(e.message) ? t("blockedMsg", { s: STORE_NAME[store] }) : e.message) : t("noServer") };
+    const msg = !e.status ? t("noServer") : e.status === 429 ? t("refreshLimit")
+      : /blocked/i.test(e.message) ? t("blockedMsg", { s: STORE_NAME[store] }) : e.message;
+    r[store] = prev ? { ...prev, refreshing: false, note: msg } : { error: msg };
   }
   renderList();
 }
 function fetchItem(item, force) { STORES.forEach(s => fetchStore(item, s, force)); }
+// 点某个货品的 ↻：两家都实时抓这一件的最新价格（每个词 10 分钟内最多抓一次，见服务器 REFRESH_COOLDOWN）
+const isRefreshing = item => STORES.some(s => results[item.id]?.[s]?.refreshing);
+function refreshItem(item) {
+  if (isRefreshing(item)) return;
+  STORES.forEach(s => fetchStore(item, s, true, true));
+}
+const fmtTime = ts => new Date(ts * 1000).toLocaleString(prefs.lang === "zh" ? "zh-CN" : "en-AU",
+  { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Australia/Sydney" });
 
 // ================= 选品记忆 =================
 // 在「换一个」里挑过的商品，按商品名和搜索词记下来；下次添加同名商品、开始新一周时自动选中
@@ -465,6 +483,7 @@ function renderList() {
         <button class="star ${star ? "on" : ""}" data-act="star" title="${t(star ? "starOn" : "starOff")}">${star ? "★" : "☆"}</button>
         <span class="name">${esc(it.label)}</span>
         ${it.term !== it.label ? `<span class="term" data-act="term" title="${t("editTerm")}">${esc(it.term)}</span>` : ""}
+        <button class="ghost refresh ${isRefreshing(it) ? "spin" : ""}" data-act="refresh" title="${t("refreshItem")}" ${isRefreshing(it) ? "disabled" : ""}>↻</button>
         <span class="spacer"></span>
         ${itemModeSeg(it)}
         <span class="qty"><button data-act="dec">−</button><span>${it.qty}</span><button data-act="inc">+</button></span>
@@ -505,6 +524,9 @@ function side(it, store, p, cost, winner) {
     <button class="ghost swap" data-act="pick" data-store="${store}">${t("search")}</button></div>`;
   const isWin = winner === store;
   const lost = r.lostPick ? `<div class="note err">${esc(t("lostPick", { n: r.lostPick }))}</div>` : "";
+  const upd = r.refreshing ? `<div class="unit upd">${t("refreshing")}</div>`
+    : `${r.fetchedAt ? `<div class="unit upd">${t("updatedAt", { t: fmtTime(r.fetchedAt) })}${r.cooldown ? " · " + t("justUpdated") : ""}</div>` : ""}
+       ${r.note ? `<div class="note err">${esc(r.note)}</div>` : ""}`;
   const badges = (isWin ? `<span class="badge win">${t("cheaper")}</span>` : "")
     + (winner === "tie" ? `<span class="badge">${t("same")}</span>` : "") + badgesFor(p);
   return `<div class="side ${isWin ? "win" : ""}">
@@ -516,6 +538,7 @@ function side(it, store, p, cost, winner) {
         ${it.qty > 1 ? `<span class="unit"> × ${it.qty} = ${money(cost)}</span>` : ""}</div>
       <div class="unit">${esc(p.unitLabel || "")}</div>
       <div class="badges">${badges}</div>
+      ${upd}
       ${lost}
     </div>
     <button class="ghost swap" data-act="pick" data-store="${store}">${t("swap")}</button>
@@ -947,6 +970,7 @@ $("#list").addEventListener("click", e => {
   const act = btn.dataset.act;
   if (act === "star") return toggleEssential(it);
   if (act === "mode") return setItemMode(it, btn.dataset.mode);
+  if (act === "refresh") return refreshItem(it);
   if (act === "pick") return openPicker(it, btn.dataset.store);
   if (act === "retry") return fetchStore(it, btn.dataset.store, true);
   if (act === "inc") it.qty++;

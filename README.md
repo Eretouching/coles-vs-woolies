@@ -28,7 +28,10 @@ Self-hosted, no accounts, one small Python server with a SQLite file.
   Nothing is doubled or dropped: each item goes to exactly one store, quantities are set exactly, and the
   trolley is verified afterwards.
 - **Prices refreshed weekly**: prices are cached for a whole week and a background job refreshes them slowly
-  every Wednesday 7:00 (Sydney time). There is no manual refresh, to avoid being blocked.
+  every Wednesday 7:00 (Sydney time). There is no "refresh everything" button, to avoid being blocked.
+- **Refresh a single item**: the ↻ next to an item fetches its latest price at both stores right now. To stay
+  polite, the same search term is fetched at most once every 10 minutes (extra clicks reuse the fresh data) and each
+  IP gets 30 refreshes per hour. If the fetch fails, the previous price is kept.
 - **Bilingual UI** (中文 / English) and **multi-device sync** through an 8-character list code (no sign-up).
 
 ## Requirements
@@ -139,7 +142,7 @@ All environment variables are optional. See [`.env.example`](.env.example).
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/search?store=coles\|woolworths&q=&storeId=` | Search products (`storeId` is a Coles store id, optional) |
+| GET | `/api/search?store=coles\|woolworths&q=&storeId=&fresh=1` | Search products (`storeId` is a Coles store id, optional; `fresh=1` fetches live, rate-limited) |
 | GET | `/api/stores?q=2067` | Find nearby Coles stores by postcode/suburb |
 | POST | `/api/users` | Create a list code |
 | GET | `/api/users/{code}` | Read list, essentials and settings |

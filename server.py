@@ -27,7 +27,7 @@ HOST = os.environ.get("HOST", "127.0.0.1")
 ROOT = Path(__file__).parent / "static"
 
 # 每个 IP 的请求频率限制：(次数, 秒)
-LIMITS = {"search": (90, 60), "api": (120, 60), "create": (10, 3600), "email": (3, 3600)}
+LIMITS = {"search": (90, 60), "api": (120, 60), "create": (10, 3600), "email": (3, 3600), "refresh": (30, 3600)}
 _hits = defaultdict(deque)
 _hits_lock = threading.Lock()
 
@@ -113,7 +113,13 @@ class Handler(SimpleHTTPRequestHandler):
         if not term or store not in stores.STORES or (store_id and not store_id.isdigit()):
             return self._json(400, {"error": "need q and store=coles|woolworths"})
         try:
-            # 价格按周缓存：本周查过的直接返回；没有「强制刷新」，每周三 7:00 统一更新
+            if (qs.get("fresh") or [""])[0] == "1":
+                # 用户点了某个货品的「刷新」：实时抓这一个词。限频：每个 IP 每小时 30 次，同一个词 10 分钟内只抓一次
+                if not allowed(self.ip, "refresh"):
+                    return self._json(429, {"error": "too many refreshes, try again later"})
+                items, fetched_at, cooled = stores.search_fresh(store, term, store_id or None)
+                return self._json(200, {"store": store, "q": term, "items": items, "fetchedAt": fetched_at, "cooldown": cooled})
+            # 平时价格按周缓存：本周查过的直接返回，每周三 7:00 统一更新
             items, fetched_at = stores.search(store, term, store_id or None, with_time=True)
             self._json(200, {"store": store, "q": term, "items": items, "fetchedAt": fetched_at})
         except Exception as e:  # 网络/被拦截等
