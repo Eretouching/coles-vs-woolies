@@ -1,95 +1,171 @@
-# Coles vs Woolworths 比价 · Price Check
+# Coles vs Woolworths Price Check
 
-输入购物清单（中文或英文），实时比较 Coles 和 Woolworths 网上商城的价格。
+**English** · [中文](README.zh-CN.md)
 
-- **比价**：整单去哪家便宜、每件哪家便宜（按单价比，自动算 "2 for $X" 多买优惠）、两家分开买能省多少
-- **自动选品**：全局选「最相关」或「单价最便宜」，每件商品也可以单独切换；「单价最便宜」只在同一分类里比较
-  （新鲜蓝莓不会被换成冷冻蓝莓或蓝莓松饼）
-- **选品记忆**：在「换一个」里挑过的商品会记在服务器上，下次添加同名商品、开始新一周时自动选中；
-  点那件商品自己的「相关 / 最便宜」按钮可以忘掉记忆、恢复自动选品
-- **选择门店**：右上角 📍 输入邮编或区名，选你常去的 Coles 门店，Coles 就按这家店的价格比较。
-  Woolworths 按门店查价需要登录账号，所以只能用网上默认价（悉尼市区各店基本一致）
-- **一键加入购物车**：总价卡片上的「🛒 加入购物车」按方案（全在 Coles / 全在 Woolworths / 分开买）生成购物单。
-  第一次把「🛒 比价加购」书签拖到书签栏；之后点「打开 … 并加购」，在超市官网登录后点这个书签，商品就会加入你的购物车。
-  密码只在超市官网输入，不经过这个工具；书签只加购物车，不结账。
-  防重复、防丢货：每件只分到一家（某家没有就自动改去另一家，两家都没有或还在查价就不允许加购）；
-  书签把数量设成准确值、合并同款、移除购物车里已分给另一家的同款，加完后逐件核对数量
-- **每周必需品**：点商品名左边的 ☆ 标记每周都买的东西（会记住两边选好的具体商品），下周点「开始新一周」一键载入
-- **每周更新一次价格**：两家超市每周三换价格，所以服务器把查到的价格存在数据库里一整周，
-  每周三 7:00（悉尼时间）后台慢慢把所有搜过的商品重新查一遍（每次请求间隔几秒，被拦截就暂停再补）。
-  这一周内不会重复去超市网站查，也没有「强制刷新」，最大程度避免被拦截
-- **本周特价提醒**：两家超市每周三换特价。「本周特价」页显示你的必需品有哪些在打折；配置了邮箱发件服务器的话，每周三早上 7 点（悉尼时间）自动发邮件
-- **中英双语**：右上角切换
-- **多设备同步**：不用注册。每个浏览器会自动得到一个 8 位「清单码」，在手机上输入同一个码就能看到同一份清单
+Type your shopping list (in English or Chinese) and compare live prices at Coles and Woolworths in Australia.
+Self-hosted, no accounts, one small Python server with a SQLite file.
 
-## 本地运行
+> ## ⚠️ Must run from an Australian IP address
+> Coles and Woolworths do not serve this tool from IP addresses **outside Australia**. Deployed on a
+> Singapore server, every price lookup fails with HTTP 502. Run it on your own computer or home network
+> in Australia, or host it on a server **located in Australia** (see [Deploy](#deploy)). Choosing an
+> overseas region on a cloud platform will not work, no matter how close it is.
 
-双击 `启动比价.command`，或在终端运行：
+## Features
+
+- **Compare**: which store is cheaper for the whole list and for each item (by unit price, multi-buy
+  deals like "2 for $X" included), and how much you save by splitting the shop.
+- **Auto-pick**: "Most relevant" or "Cheapest per unit" globally, or per item. Cheapest only compares
+  products in the same category (fresh blueberries are never swapped for frozen ones or muffins).
+- **Pick memory**: products you choose with "Change" are remembered and reused next time.
+- **Coles store selection**: choose your Coles store by postcode or suburb. Woolworths store-specific
+  pricing needs a login, so Woolworths always uses its online default prices.
+- **Weekly essentials**: star the things you buy every week and reload them in one click.
+- **Weekly specials alerts**: both stores change prices on Wednesdays. See which of your essentials are on
+  special, and optionally get an email every Wednesday morning.
+- **One-click add to trolley**: a bookmarklet adds the list to your trolley on the supermarket's own site,
+  using your own logged-in session. Your password never touches this server, and nothing is checked out or paid.
+  Nothing is doubled or dropped: each item goes to exactly one store, quantities are set exactly, and the
+  trolley is verified afterwards.
+- **Prices refreshed weekly**: prices are cached for a whole week and a background job refreshes them slowly
+  every Wednesday 7:00 (Sydney time). There is no manual refresh, to avoid being blocked.
+- **Bilingual UI** (中文 / English) and **multi-device sync** through an 8-character list code (no sign-up).
+
+## Requirements
+
+- **An Australian IP address** (see the warning above).
+- Python 3.9+ and `curl` (Coles blocks Python's HTTP client but allows `curl`). No pip packages.
+- Or just Docker.
+
+## Run locally
 
 ```bash
 python3 server.py
 ```
 
-然后打开 http://localhost:8765 。只需要 Python 3.9+ 和系统自带的 curl，不用装任何第三方包。
+Open http://localhost:8765. On macOS you can also double-click `启动比价.command`.
+Data is stored in `./data/`.
 
-## 部署到 Zeabur
+## Deploy
 
-1. 把这个文件夹推到 GitHub（`data/` 已在 `.gitignore` 里，不会上传本地数据库）。
-2. Zeabur 控制台 → 新建项目（**区域尽量选离澳洲近的**，例如新加坡/东京）→ 添加服务 → 选 GitHub 仓库。
-   Zeabur 会自动识别 `Dockerfile` 并构建。
-3. **挂载持久化存储**：服务页面 → **Volumes** 标签 → 添加：Volume ID 填 `data`，Mount Directory 填 `/data`。
-   不挂载的话，每次重新部署或重启，数据库（用户清单、价格缓存）都会被清空；服务启动日志里也会有警告。
-   注意：挂载了存储卷后服务不支持无停机重启，每次重启会有短暂中断，数据不受影响。
-4. 「Networking / 网络」里生成一个域名，端口是 `8080`。
-5. （可选）开启邮件提醒，在「Variables / 环境变量」里加上：
+The server needs three things: **an Australian IP**, **a persistent volume mounted at `/data`**
+(otherwise every redeploy wipes users' lists and the price cache), and an always-on process
+(the Wednesday job runs inside the server; a service that sleeps when idle will run it late).
 
-   | 变量 | 例子 | 说明 |
-   |---|---|---|
-   | `SMTP_HOST` | `smtp.gmail.com` | 发件服务器 |
-   | `SMTP_PORT` | `587` | 587（STARTTLS）或 465（SSL） |
-   | `SMTP_USER` | `you@gmail.com` | 登录用户名 |
-   | `SMTP_PASS` | 应用专用密码 | Gmail 需要在账号安全设置里生成「应用专用密码」 |
-   | `SMTP_FROM` | `Price Bot <you@gmail.com>` | 可选，默认同 `SMTP_USER` |
-   | `APP_URL` | `https://xxx.zeabur.app` | 邮件里的链接 |
-   | `COLES_BFF_KEY` | 见下方 | 可选，门店搜索用 |
+### Docker on an Australian server (recommended)
 
-   **关于 `COLES_BFF_KEY`**：Coles 门店搜索接口需要 Coles 网页里公开的一个前端 key。服务器会自动从 Coles
-   网页读取；如果网页一直被 Coles 防爬虫拦截（门店搜索报错），可以手动设置：用浏览器打开 coles.com.au，
-   按 F12 打开控制台，输入 `__RUNTIME_CONFIG__.BFF_API_SUBSCRIPTION_KEY`，把得到的值填进这个环境变量。
+Any VPS or cloud instance located in Australia works (Sydney, Melbourne...).
 
-   也可以用 Resend、Brevo、SendGrid 等服务提供的 SMTP。
+```bash
+git clone https://github.com/Eretouching/coles-vs-woolies.git
+cd coles-vs-woolies
+docker build -t coles-vs-woolies .
+docker run -d --name price-check --restart unless-stopped \
+  -p 8080:8080 -v price-check-data:/data \
+  --env-file .env \
+  coles-vs-woolies
+```
 
-部署完先打开 `https://你的域名/api/search?store=coles&q=milk` 和 `...store=woolworths&q=milk`，
-能看到商品 JSON 就说明服务器能正常访问两家超市。
+Copy [`.env.example`](.env.example) to `.env` for the optional settings (email, etc.). Put a reverse proxy
+with HTTPS (Caddy, nginx...) in front. Health check: `GET /healthz`.
 
-## 文件结构
+### Zeabur / other container platforms
 
-| 文件 | 作用 |
-|---|---|
-| `server.py` | HTTP 服务器和 API |
-| `stores.py` | 查询 Coles / Woolworths 商品价格 |
-| `db.py` | SQLite 数据库（`$DATA_DIR/app.db`） |
-| `pricecache.py` | 每周价格缓存（数据库表 `price_cache`，有效期到下一个周三 7:00） |
-| `weekly.py` | 每周三 7:00 慢慢更新价格、检查特价、发邮件提醒 |
-| `static/` | 网页（`app.js` 逻辑、`dict.js` 中文→英文词表、`app.css` 样式） |
-| `static/cart-bookmarklet.js` | 「一键加购」书签的源码（在超市网站上运行） |
+Only if the platform can run your service in an Australian region. Check that before you start, and after
+deploying open `/api/search?store=woolworths&q=milk` and `/api/search?store=coles&q=milk`: if you see product
+JSON it works; if you get an `error`, the platform's IP is being blocked.
 
-## API
+1. Create a service from your fork of this repository. The `Dockerfile` is detected automatically.
+2. Add a **volume**: Volume ID `data`, mount directory `/data` (Zeabur: service → Volumes). Mounted volumes
+   disable zero-downtime restarts, so each restart has a short outage; data is kept. Without the volume the
+   startup log prints a warning.
+3. Expose port `8080` and generate a domain.
+4. Optionally add the environment variables below.
 
-| 方法 | 路径 | 说明 |
+## Configuration
+
+All environment variables are optional. See [`.env.example`](.env.example).
+
+| Variable | Default | Description |
 |---|---|---|
-| GET | `/api/search?store=coles\|woolworths&q=&storeId=` | 搜索商品（`storeId` 为 Coles 门店编号，可选） |
-| GET | `/api/stores?q=2067` | 按邮编/区名找附近的 Coles 门店 |
-| POST | `/api/users` | 新建清单码 |
-| GET | `/api/users/{code}` | 读取清单、必需品和设置 |
-| PUT | `/api/users/{code}/list` · `/essentials` · `/picks` · `/settings` | 保存（`picks` 是选品记忆） |
-| GET | `/api/users/{code}/specials` | 本周必需品特价检查 |
-| POST | `/api/users/{code}/test-email` | 立即发一封特价提醒邮件 |
-| GET | `/healthz` | 健康检查 |
+| `HOST` | `127.0.0.1` (Docker image: `0.0.0.0`) | Address to listen on |
+| `PORT` | `8765` (Docker image: `8080`) | Port to listen on |
+| `DATA_DIR` | `./data` (Docker image: `/data`) | Where `app.db` is stored. Must be persistent in production |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | – | Outgoing mail for weekly specials emails. Without `SMTP_HOST` and `SMTP_USER`, specials only show in the web page. Port 587 = STARTTLS, 465 = SSL. Gmail needs an app password |
+| `APP_URL` | – | Link used inside the emails |
+| `COLES_BFF_KEY` | read automatically | Public front-end key used by Coles store search. Only set it if Coles' web page is blocked: open coles.com.au, run `__RUNTIME_CONFIG__.BFF_API_SUBSCRIPTION_KEY` in the browser console |
 
-## 说明
+## Operations
 
-- 价格来自两家官网网上商城的默认门店，实体店偶尔不同。
-- Coles 网站有防爬虫。如果提示被拦截，过几分钟再刷新即可。
-- 清单码就是访问凭证，知道码的人都能看到和修改这份清单。
-- 这是个人/小范围使用的工具，请不要高频批量抓取。
+- **Weekly job**: every Wednesday from 07:00 Sydney time the server slowly refreshes prices (5 s between Coles
+  requests, 2 s between Woolworths requests), sends specials emails, then refreshes other searched terms. If Coles
+  blocks it, it pauses 15 minutes and retries; unfinished work is retried an hour later.
+- **Backup**: everything lives in `$DATA_DIR/app.db` (SQLite, WAL mode). Back it up with
+  `sqlite3 app.db ".backup backup.db"`, or stop the server and copy `app.db`, `app.db-wal`, `app.db-shm`.
+- **Upgrade**: pull, rebuild, restart. New database columns are added automatically.
+- **Logs**: the server prints API requests and the weekly job's progress to stdout.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Every price lookup returns 502 | Not running from an Australian IP. Move the server to Australia |
+| Only Coles fails: "blocked by Coles anti-bot" | Temporary. Coles rate-limits; the server pauses Coles requests for 10 minutes. Try again later |
+| Coles store search fails | Set `COLES_BFF_KEY` (see above) |
+| Lists disappear after redeploying | `/data` is not a persistent volume |
+| No specials emails | `SMTP_HOST`/`SMTP_USER` not set, the user hasn't enabled alerts, or the service was asleep on Wednesday |
+| One-click trolley says "please log in" | Log in on the supermarket's site first, then click the bookmark again. After the site changes, the bookmarklet may need updating |
+
+## How it works
+
+| File | Purpose |
+|---|---|
+| `server.py` | HTTP server, JSON API, per-IP rate limits |
+| `stores.py` | Talks to Coles and Woolworths (Woolworths JSON search API; Coles Next.js data endpoint through `curl`) |
+| `db.py` | SQLite: users (list code), lists, essentials, pick memory, settings |
+| `pricecache.py` | Weekly price cache, valid until the next Wednesday 07:00 Sydney time |
+| `weekly.py` | Wednesday job: slow refresh, specials check, emails |
+| `static/` | Web UI (`app.js`, `app.css`, `dict.js` Chinese→English search terms) |
+| `static/cart-bookmarklet.js` | Source of the "add to trolley" bookmarklet (runs on the supermarket site) |
+
+<details>
+<summary>API</summary>
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/search?store=coles\|woolworths&q=&storeId=` | Search products (`storeId` is a Coles store id, optional) |
+| GET | `/api/stores?q=2067` | Find nearby Coles stores by postcode/suburb |
+| POST | `/api/users` | Create a list code |
+| GET | `/api/users/{code}` | Read list, essentials and settings |
+| PUT | `/api/users/{code}/list` · `/essentials` · `/picks` · `/settings` | Save |
+| GET | `/api/users/{code}/specials` | Check this week's specials for the essentials |
+| POST | `/api/users/{code}/test-email` | Send a specials email now |
+| GET | `/healthz` | Health check |
+
+</details>
+
+## Privacy and security
+
+- The server stores, per list code: the shopping list, essentials, remembered product picks, your Coles store, language,
+  and (only if you enter it) your email address. No passwords and no supermarket accounts are ever handled.
+- **Whoever knows a list code can read and edit that list.** Treat it like a password and don't post it publicly.
+- Rate limits are per client IP. Behind a reverse proxy, make sure it sets `X-Forwarded-For` and the app port is
+  not reachable directly from the internet.
+
+## Disclaimer
+
+This is an independent, unofficial project. It is **not affiliated with, endorsed by, or connected to Coles
+Group or Woolworths Group**. It reads the same public product pages you would see in a browser. Their terms of
+use may restrict automated access, so use it responsibly: personal or small-scale use only, don't run high-volume
+scrapers, and respect the built-in weekly caching. Prices may differ in store, and the tool may stop working at
+any time if the supermarkets change their websites. Provided as is, without warranty.
+
+## Contributing
+
+Issues and pull requests are welcome, especially when a supermarket changes its site. The code deliberately has
+no third-party dependencies, please keep it that way. Useful checks before a PR: `python3 -m py_compile *.py`
+and `node --check static/app.js static/cart-bookmarklet.js`.
+
+## License
+
+[MIT](LICENSE)
